@@ -1,0 +1,27 @@
+{
+  "name": "port-reflect-web",
+  "version": "1.0.0",
+  "description": "可视化内网穿透代理服务器管理界面",
+  "main": "web-server.js",
+  "scripts": {
+    "start": "node web-server.js",
+    "dev": "nodemon web-server.js",
+    "web": "node web-server.js"
+  },
+  "keywords": [
+    "proxy",
+    "tunnel",
+    "web-interface",
+    "visualization"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "net": "^1.0.2",
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

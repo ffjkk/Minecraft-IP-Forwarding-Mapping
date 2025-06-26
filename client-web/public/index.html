@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>内网穿透客户端管理面板</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .status-card {
+            transition: all 0.3s ease;
+        }
+        .status-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .log-container {
+            height: 400px;
+            overflow-y: auto;
+            background-color: #1e1e1e;
+            color: #ffffff;
+            font-family: 'Courier New', monospace;
+        }
+        .log-entry {
+            padding: 2px 8px;
+            border-left: 3px solid transparent;
+        }
+        .log-entry.success {
+            border-left-color: #28a745;
+            background-color: rgba(40, 167, 69, 0.1);
+        }
+        .log-entry.info {
+            border-left-color: #17a2b8;
+            background-color: rgba(23, 162, 184, 0.1);
+        }
+        .log-entry.warning {
+            border-left-color: #ffc107;
+            background-color: rgba(255, 193, 7, 0.1);
+        }
+        .log-entry.error {
+            border-left-color: #dc3545;
+            background-color: rgba(220, 53, 69, 0.1);
+        }
+        .connection-item {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            padding: 15px;
+            transition: all 0.3s ease;
+        }
+        .connection-item:hover {
+            transform: scale(1.02);
+        }
+        .connection-item.failed {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+        }
+        .connection-item.active {
+            background: linear-gradient(135deg, #00d2d3 0%, #54a0ff 100%);
+        }
+        .navbar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        }
+        .card-header {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+        .status-online {
+            color: #28a745;
+        }
+        .status-offline {
+            color: #dc3545;
+        }
+        .status-connecting {
+            color: #ffc107;
+        }
+        .chart-container {
+            height: 300px;
+        }
+        .control-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+        .status-connected {
+            background-color: rgba(40, 167, 69, 0.2);
+            color: #28a745;
+        }
+        .status-disconnected {
+            background-color: rgba(220, 53, 69, 0.2);
+            color: #dc3545;
+        }
+        .status-error {
+            background-color: rgba(255, 193, 7, 0.2);
+            color: #856404;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-laptop"></i> 内网穿透客户端
+            </a>
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text">
+                    <i class="bi bi-circle-fill" id="connection-status"></i>
+                    <span id="connection-text">连接中...</span>
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <!-- 控制按钮 -->
+        <div class="control-buttons">
+            <button class="btn btn-success" id="start-btn" onclick="startClient()">
+                <i class="bi bi-play-fill"></i> 启动客户端
+            </button>
+            <button class="btn btn-danger" id="stop-btn" onclick="stopClient()">
+                <i class="bi bi-stop-fill"></i> 停止客户端
+            </button>
+            <button class="btn btn-warning" id="restart-btn" onclick="restartClient()">
+                <i class="bi bi-arrow-clockwise"></i> 重启客户端
+            </button>
+            <div class="ms-auto">
+                <span class="status-indicator" id="client-status">
+                    <i class="bi bi-circle-fill me-2"></i>
+                    <span>状态检测中...</span>
+                </span>
+            </div>
+        </div>
+
+        <!-- 状态卡片 -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card status-card h-100">
+                    <div class="card-body text-center">
+                        <i class="bi bi-link-45deg text-primary" style="font-size: 2rem;"></i>
+                        <h4 class="mt-2" id="total-connections">0</h4>
+                        <p class="text-muted mb-0">总连接数</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card status-card h-100">
+                    <div class="card-body text-center">
+                        <i class="bi bi-lightning-fill text-success" style="font-size: 2rem;"></i>
+                        <h4 class="mt-2" id="active-connections">0</h4>
+                        <p class="text-muted mb-0">活跃连接</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card status-card h-100">
+                    <div class="card-body text-center">
+                        <i class="bi bi-check-circle-fill text-info" style="font-size: 2rem;"></i>
+                        <h4 class="mt-2" id="successful-connections">0</h4>
+                        <p class="text-muted mb-0">成功连接</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card status-card h-100">
+                    <div class="card-body text-center">
+                        <i class="bi bi-x-circle-fill text-danger" style="font-size: 2rem;"></i>
+                        <h4 class="mt-2" id="failed-connections">0</h4>
+                        <p class="text-muted mb-0">失败连接</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 客户端信息 -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-info-circle"></i> 客户端信息
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-6">
+                                <strong>运行时间:</strong><br>
+                                <span id="uptime">0分钟</span>
+                            </div>
+                            <div class="col-6">
+                                <strong>数据传输:</strong><br>
+                                <span id="data-transferred">0 B</span>
+                            </div>
+                        </div>
+                        <hr>
+                        <div class="row">
+                            <div class="col-6">
+                                <strong>目标服务器:</strong><br>
+                                <span class="badge bg-primary" id="target-server">159.75.133.177:9000</span>
+                            </div>
+                            <div class="col-6">
+                                <strong>本地服务器:</strong><br>
+                                <span class="badge bg-success" id="local-server">127.0.0.1:25565</span>
+                            </div>
+                        </div>
+                        <hr>
+                        <div class="row">
+                            <div class="col-6">
+                                <strong>重连次数:</strong><br>
+                                <span id="reconnect-attempts">0</span>
+                            </div>
+                            <div class="col-6">
+                                <strong>最后活动:</strong><br>
+                                <span id="last-activity">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-graph-up"></i> 连接统计
+                    </div>
+                    <div class="card-body">
+                        <canvas id="connectionChart" class="chart-container"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 连接历史和日志 -->
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-clock-history"></i> 连接历史
+                        <span class="badge bg-light text-dark ms-2" id="history-count-badge">0</span>
+                    </div>
+                    <div class="card-body">
+                        <div id="connection-history-list" style="max-height: 400px; overflow-y: auto;">
+                            <div class="text-center text-muted">
+                                <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                                <p class="mt-2">暂无连接历史</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-terminal"></i> 实时日志
+                        <button class="btn btn-sm btn-light ms-2" onclick="clearLogs()">
+                            <i class="bi bi-trash"></i> 清空
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="log-container" class="log-container"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 脚本 -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Socket.IO连接
+        const socket = io();
+        
+        // 图表配置
+        const ctx = document.getElementById('connectionChart').getContext('2d');
+        const connectionChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: '活跃连接数',
+                    data: [],
+                    borderColor: 'rgb(75, 192, 192)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    tension: 0.1
+                }, {
+                    label: '重连次数',
+                    data: [],
+                    borderColor: 'rgb(255, 99, 132)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    tension: 0.1,
+                    yAxisID: 'y1'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        beginAtZero: true
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        beginAtZero: true,
+                        grid: {
+                            drawOnChartArea: false,
+                        },
+                    }
+                }
+            }
+        });
+
+        // 连接状态管理
+        socket.on('connect', () => {
+            document.getElementById('connection-status').className = 'bi bi-circle-fill status-online';
+            document.getElementById('connection-text').textContent = '已连接';
+        });
+
+        socket.on('disconnect', () => {
+            document.getElementById('connection-status').className = 'bi bi-circle-fill status-offline';
+            document.getElementById('connection-text').textContent = '连接断开';
+        });
+
+        // 统计信息更新
+        socket.on('stats-update', (stats) => {
+            document.getElementById('total-connections').textContent = stats.totalConnections;
+            document.getElementById('active-connections').textContent = stats.activeConnections;
+            document.getElementById('successful-connections').textContent = stats.successfulConnections;
+            document.getElementById('failed-connections').textContent = stats.failedConnections;
+            document.getElementById('reconnect-attempts').textContent = stats.reconnectAttempts;
+            
+            // 更新运行时间
+            const uptimeMs = stats.uptime;
+            const hours = Math.floor(uptimeMs / (1000 * 60 * 60));
+            const minutes = Math.floor((uptimeMs % (1000 * 60 * 60)) / (1000 * 60));
+            document.getElementById('uptime').textContent = `${hours}小时${minutes}分钟`;
+            
+            // 更新数据传输量
+            document.getElementById('data-transferred').textContent = formatBytes(stats.totalDataTransferred);
+            
+            // 更新最后活动时间
+            if (stats.lastActivity) {
+                document.getElementById('last-activity').textContent = new Date(stats.lastActivity).toLocaleTimeString();
+            }
+            
+            // 更新客户端状态
+            updateClientStatus(stats.currentStatus);
+            
+            // 更新图表
+            const now = new Date().toLocaleTimeString();
+            if (connectionChart.data.labels.length > 20) {
+                connectionChart.data.labels.shift();
+                connectionChart.data.datasets[0].data.shift();
+                connectionChart.data.datasets[1].data.shift();
+            }
+            connectionChart.data.labels.push(now);
+            connectionChart.data.datasets[0].data.push(stats.activeConnections);
+            connectionChart.data.datasets[1].data.push(stats.reconnectAttempts);
+            connectionChart.update();
+        });
+
+        // 连接历史更新
+        socket.on('connection-history', (history) => {
+            updateConnectionHistory(history);
+        });
+
+        // 连接事件
+        socket.on('connection-event', (event) => {
+            // 这里可以处理特定的连接事件
+            if (event.event === 'tunnel-established') {
+                addLogEntry('success', `隧道建立: 连接${event.data.id}`, event.timestamp);
+            }
+        });
+
+        // 日志消息
+        socket.on('log-message', (log) => {
+            addLogEntry(log.level, log.message, log.timestamp);
+        });
+
+        // 更新客户端状态
+        function updateClientStatus(status) {
+            const statusElement = document.getElementById('client-status');
+            const statusIcon = statusElement.querySelector('i');
+            const statusText = statusElement.querySelector('span');
+            
+            statusElement.className = 'status-indicator';
+            
+            switch (status) {
+                case 'connected':
+                    statusElement.classList.add('status-connected');
+                    statusIcon.className = 'bi bi-circle-fill me-2 status-online';
+                    statusText.textContent = '已连接';
+                    break;
+                case 'connecting':
+                    statusElement.classList.add('status-error');
+                    statusIcon.className = 'bi bi-circle-fill me-2 status-connecting';
+                    statusText.textContent = '连接中...';
+                    break;
+                case 'error':
+                    statusElement.classList.add('status-error');
+                    statusIcon.className = 'bi bi-circle-fill me-2 status-offline';
+                    statusText.textContent = '连接错误';
+                    break;
+                case 'stopped':
+                default:
+                    statusElement.classList.add('status-disconnected');
+                    statusIcon.className = 'bi bi-circle-fill me-2 status-offline';
+                    statusText.textContent = '已停止';
+                    break;
+            }
+        }
+
+        // 更新连接历史列表
+        function updateConnectionHistory(history) {
+            const container = document.getElementById('connection-history-list');
+            document.getElementById('history-count-badge').textContent = history.length;
+            
+            if (history.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-muted">
+                        <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                        <p class="mt-2">暂无连接历史</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = history.slice(-10).reverse().map(conn => {
+                const statusClass = getConnectionStatusClass(conn.status);
+                const duration = conn.duration ? formatDuration(conn.duration) : '进行中';
+                const errors = conn.errors.length > 0 ? `<br><small class="text-warning">错误: ${conn.errors.length}个</small>` : '';
+                
+                return `
+                    <div class="connection-item ${statusClass}">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>连接 #${conn.id}</strong>
+                                <br>
+                                <small>${getStatusText(conn.status)}</small>
+                                ${errors}
+                            </div>
+                            <div class="text-end">
+                                <div class="badge bg-light text-dark">${formatBytes(conn.bytesTransferred)}</div>
+                                <br>
+                                <small>${duration}</small>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 获取连接状态类名
+        function getConnectionStatusClass(status) {
+            switch (status) {
+                case 'tunnel-established':
+                case 'proxy-connected':
+                    return 'active';
+                case 'closed':
+                    return '';
+                default:
+                    return 'failed';
+            }
+        }
+
+        // 获取状态文本
+        function getStatusText(status) {
+            const statusMap = {
+                'connecting': '连接中',
+                'proxy-connected': '代理已连接',
+                'tunnel-established': '隧道已建立',
+                'closed': '已关闭',
+                'proxy-connection-failed': '代理连接失败',
+                'mc-connection-failed': 'MC连接失败'
+            };
+            return statusMap[status] || status;
+        }
+
+        // 添加日志条目
+        function addLogEntry(level, message, timestamp) {
+            const container = document.getElementById('log-container');
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry ${level}`;
+            
+            const time = new Date(timestamp).toLocaleTimeString();
+            logEntry.innerHTML = `
+                <span class="text-muted">[${time}]</span> 
+                <span class="${level === 'error' ? 'text-danger' : level === 'warning' ? 'text-warning' : level === 'success' ? 'text-success' : 'text-info'}">[${level.toUpperCase()}]</span> 
+                ${message}
+            `;
+            
+            container.appendChild(logEntry);
+            container.scrollTop = container.scrollHeight;
+            
+            // 限制日志条目数量
+            if (container.children.length > 500) {
+                container.removeChild(container.firstChild);
+            }
+        }
+
+        // 清空日志
+        function clearLogs() {
+            document.getElementById('log-container').innerHTML = '';
+        }
+
+        // 控制函数
+        async function startClient() {
+            try {
+                const response = await fetch('/api/start', { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    addLogEntry('success', result.message, new Date());
+                } else {
+                    addLogEntry('warning', result.message, new Date());
+                }
+            } catch (error) {
+                addLogEntry('error', '启动请求失败: ' + error.message, new Date());
+            }
+        }
+
+        async function stopClient() {
+            try {
+                const response = await fetch('/api/stop', { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    addLogEntry('warning', result.message, new Date());
+                } else {
+                    addLogEntry('warning', result.message, new Date());
+                }
+            } catch (error) {
+                addLogEntry('error', '停止请求失败: ' + error.message, new Date());
+            }
+        }
+
+        async function restartClient() {
+            try {
+                const response = await fetch('/api/restart', { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    addLogEntry('info', result.message, new Date());
+                }
+            } catch (error) {
+                addLogEntry('error', '重启请求失败: ' + error.message, new Date());
+            }
+        }
+
+        // 格式化字节数
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // 格式化持续时间
+        function formatDuration(ms) {
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            
+            if (hours > 0) {
+                return `${hours}时${minutes % 60}分`;
+            } else if (minutes > 0) {
+                return `${minutes}分${seconds % 60}秒`;
+            } else {
+                return `${seconds}秒`;
+            }
+        }
+    </script>
+</body>
+</html>
