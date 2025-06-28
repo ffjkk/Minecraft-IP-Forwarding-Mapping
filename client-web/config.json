@@ -1,0 +1,37 @@
+{
+  "server": {
+    "host": "159.75.133.177",
+    "port": 9000,
+    "webPort": 3001
+  },
+  "portMappings": [
+    {
+      "id": "minecraft",
+      "name": "Minecraft服务器",
+      "localHost": "127.0.0.1",
+      "localPort": 25565,
+      "publicPort": 25565,
+      "preferredPort": 25565,
+      "enabled": true,
+      "description": "我的世界服务器",
+      "autoReconnect": true
+    },
+    {
+      "id": "1751140654141",
+      "name": "多服务器测试",
+      "localHost": "127.0.0.1",
+      "localPort": 12345,
+      "publicPort": 25566,
+      "preferredPort": 25555,
+      "enabled": true,
+      "description": "",
+      "autoReconnect": true
+    }
+  ],
+  "connection": {
+    "minIdleConnections": 1,
+    "maxTotalConnections": 100,
+    "checkInterval": 5000,
+    "reconnectDelay": 2000
+  }
+}

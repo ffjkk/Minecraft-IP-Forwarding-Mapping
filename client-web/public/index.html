@@ -180,6 +180,28 @@
             </div>
         </div>
 
+        <!-- 端口映射管理 -->
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-hdd-network"></i> 端口映射管理</span>
+                        <button class="btn btn-primary btn-sm" onclick="showAddMappingModal()">
+                            <i class="bi bi-plus-circle"></i> 添加映射
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="port-mappings-container">
+                            <div class="text-center text-muted">
+                                <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                                <p class="mt-2">暂无端口映射，点击上方按钮添加映射</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- 客户端信息 -->
         <div class="row mb-4">
             <div class="col-md-6">
@@ -188,38 +210,28 @@
                         <i class="bi bi-info-circle"></i> 客户端信息
                     </div>
                     <div class="card-body">
-                        <div class="row">
-                            <div class="col-6">
-                                <strong>运行时间:</strong><br>
-                                <span id="uptime">0分钟</span>
-                            </div>
-                            <div class="col-6">
-                                <strong>数据传输:</strong><br>
-                                <span id="data-transferred">0 B</span>
-                            </div>
-                        </div>
-                        <hr>
-                        <div class="row">
-                            <div class="col-6">
-                                <strong>目标服务器:</strong><br>
-                                <span class="badge bg-primary" id="target-server">159.75.133.177:9000</span>
-                            </div>
-                            <div class="col-6">
-                                <strong>本地服务器:</strong><br>
-                                <span class="badge bg-success" id="local-server">127.0.0.1:25565</span>
-                            </div>
-                        </div>
-                        <hr>
-                        <div class="row">
-                            <div class="col-6">
-                                <strong>重连次数:</strong><br>
-                                <span id="reconnect-attempts">0</span>
-                            </div>
-                            <div class="col-6">
-                                <strong>最后活动:</strong><br>
-                                <span id="last-activity">-</span>
-                            </div>
-                        </div>
+                        <table class="table table-borderless">
+                            <tr>
+                                <td><strong>运行时间:</strong></td>
+                                <td id="uptime">0小时0分钟</td>
+                            </tr>
+                            <tr>
+                                <td><strong>数据传输:</strong></td>
+                                <td id="data-transferred">0 B</td>
+                            </tr>
+                            <tr>
+                                <td><strong>重连次数:</strong></td>
+                                <td id="reconnect-attempts">0</td>
+                            </tr>
+                            <tr>
+                                <td><strong>活跃映射:</strong></td>
+                                <td id="active-mappings">0</td>
+                            </tr>
+                            <tr>
+                                <td><strong>最后活动:</strong></td>
+                                <td id="last-activity">-</td>
+                            </tr>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -264,6 +276,97 @@
                     <div class="card-body p-0">
                         <div id="log-container" class="log-container"></div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加端口映射模态框 -->
+    <div class="modal fade" id="addMappingModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">添加端口映射</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addMappingForm">
+                        <div class="mb-3">
+                            <label for="mapping-name" class="form-label">映射名称</label>
+                            <input type="text" class="form-control" id="mapping-name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="local-host" class="form-label">本地主机</label>
+                            <input type="text" class="form-control" id="local-host" value="127.0.0.1" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="local-port" class="form-label">本地端口</label>
+                            <input type="number" class="form-control" id="local-port" min="1" max="65535" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="preferred-port" class="form-label">首选公网端口（可选）</label>
+                            <input type="number" class="form-control" id="preferred-port" min="1" max="65535">
+                            <div class="form-text">留空将由服务器自动分配</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="mapping-description" class="form-label">描述（可选）</label>
+                            <textarea class="form-control" id="mapping-description" rows="2"></textarea>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="auto-reconnect" checked>
+                            <label class="form-check-label" for="auto-reconnect">自动重连</label>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="addPortMapping()">添加映射</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑端口映射模态框 -->
+    <div class="modal fade" id="editMappingModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">编辑端口映射</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editMappingForm">
+                        <input type="hidden" id="edit-mapping-id">
+                        <div class="mb-3">
+                            <label for="edit-mapping-name" class="form-label">映射名称</label>
+                            <input type="text" class="form-control" id="edit-mapping-name" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="edit-local-host" class="form-label">本地主机</label>
+                            <input type="text" class="form-control" id="edit-local-host" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="edit-local-port" class="form-label">本地端口</label>
+                            <input type="number" class="form-control" id="edit-local-port" min="1" max="65535" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="edit-preferred-port" class="form-label">首选公网端口（可选）</label>
+                            <input type="number" class="form-control" id="edit-preferred-port" min="1" max="65535">
+                            <div class="form-text">留空将由服务器自动分配</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="edit-mapping-description" class="form-label">描述（可选）</label>
+                            <textarea class="form-control" id="edit-mapping-description" rows="2"></textarea>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="edit-auto-reconnect">
+                            <label class="form-check-label" for="edit-auto-reconnect">自动重连</label>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="updatePortMapping()">保存更改</button>
                 </div>
             </div>
         </div>
@@ -352,6 +455,11 @@
             // 更新最后活动时间
             if (stats.lastActivity) {
                 document.getElementById('last-activity').textContent = new Date(stats.lastActivity).toLocaleTimeString();
+            }
+            
+            // 更新活跃映射数
+            if (stats.activeMappings !== undefined) {
+                document.getElementById('active-mappings').textContent = stats.activeMappings;
             }
             
             // 更新客户端状态
@@ -578,6 +686,273 @@
                 return `${seconds}秒`;
             }
         }
+
+        // 端口映射管理
+        let currentMappings = [];
+        
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            loadPortMappings();
+        });
+        
+        // 加载端口映射
+        async function loadPortMappings() {
+            try {
+                const response = await fetch('/api/mappings');
+                currentMappings = await response.json();
+                updateMappingsDisplay();
+            } catch (error) {
+                console.error('加载端口映射失败:', error);
+                addLogEntry('error', '加载端口映射失败: ' + error.message, new Date());
+            }
+        }
+        
+        // 更新映射显示
+        function updateMappingsDisplay() {
+            const container = document.getElementById('port-mappings-container');
+            
+            if (currentMappings.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-muted">
+                        <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                        <p class="mt-2">暂无端口映射，点击上方按钮添加映射</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = currentMappings.map(mapping => `
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-3">
+                                <h6 class="mb-1">${mapping.name}</h6>
+                                <small class="text-muted">${mapping.description || '无描述'}</small>
+                            </div>
+                            <div class="col-md-2">
+                                <span class="badge bg-info">本地</span><br>
+                                <strong>${mapping.localHost}:${mapping.localPort}</strong>
+                            </div>
+                            <div class="col-md-2">
+                                <span class="badge bg-primary">公网</span><br>
+                                <strong>${mapping.publicPort || '未分配'}</strong>
+                            </div>
+                            <div class="col-md-2 text-center">
+                                <span class="badge ${mapping.active ? 'bg-success' : 'bg-secondary'}">
+                                    ${mapping.active ? '运行中' : '已停止'}
+                                </span><br>
+                                <small class="text-muted">${mapping.connections || 0} 连接</small>
+                            </div>
+                            <div class="col-md-3 text-end">
+                                <div class="btn-group" role="group">
+                                    ${mapping.active ? 
+                                        `<button class="btn btn-outline-danger btn-sm" onclick="stopMapping('${mapping.id}')">
+                                            <i class="bi bi-stop-fill"></i> 停止
+                                        </button>` :
+                                        `<button class="btn btn-outline-success btn-sm" onclick="startMapping('${mapping.id}')">
+                                            <i class="bi bi-play-fill"></i> 启动
+                                        </button>`
+                                    }
+                                    <button class="btn btn-outline-primary btn-sm" onclick="editMapping('${mapping.id}')">
+                                        <i class="bi bi-pencil"></i> 编辑
+                                    </button>
+                                    <button class="btn btn-outline-danger btn-sm" onclick="deleteMapping('${mapping.id}')">
+                                        <i class="bi bi-trash"></i> 删除
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            
+            // 更新活跃映射统计
+            const activeMappings = currentMappings.filter(m => m.active).length;
+            document.getElementById('active-mappings').textContent = activeMappings;
+        }
+        
+        // 显示添加映射模态框
+        function showAddMappingModal() {
+            const modal = new bootstrap.Modal(document.getElementById('addMappingModal'));
+            document.getElementById('addMappingForm').reset();
+            modal.show();
+        }
+        
+        // 添加端口映射
+        async function addPortMapping() {
+            const name = document.getElementById('mapping-name').value;
+            const localHost = document.getElementById('local-host').value;
+            const localPort = parseInt(document.getElementById('local-port').value);
+            const preferredPort = document.getElementById('preferred-port').value;
+            const description = document.getElementById('mapping-description').value;
+            const autoReconnect = document.getElementById('auto-reconnect').checked;
+            
+            if (!name || !localHost || !localPort) {
+                alert('请填写必要字段');
+                return;
+            }
+            
+            const mappingData = {
+                name,
+                localHost,
+                localPort,
+                preferredPort: preferredPort ? parseInt(preferredPort) : null,
+                description,
+                autoReconnect,
+                enabled: true
+            };
+            
+            try {
+                const response = await fetch('/api/mappings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(mappingData)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    addLogEntry('success', '端口映射添加成功: ' + name, new Date());
+                    bootstrap.Modal.getInstance(document.getElementById('addMappingModal')).hide();
+                    loadPortMappings();
+                } else {
+                    addLogEntry('error', '添加端口映射失败: ' + result.message, new Date());
+                }
+            } catch (error) {
+                addLogEntry('error', '添加端口映射失败: ' + error.message, new Date());
+            }
+        }
+        
+        // 编辑映射
+        function editMapping(mappingId) {
+            const mapping = currentMappings.find(m => m.id === mappingId);
+            if (!mapping) return;
+            
+            document.getElementById('edit-mapping-id').value = mapping.id;
+            document.getElementById('edit-mapping-name').value = mapping.name;
+            document.getElementById('edit-local-host').value = mapping.localHost;
+            document.getElementById('edit-local-port').value = mapping.localPort;
+            document.getElementById('edit-preferred-port').value = mapping.preferredPort || '';
+            document.getElementById('edit-mapping-description').value = mapping.description || '';
+            document.getElementById('edit-auto-reconnect').checked = mapping.autoReconnect;
+            
+            const modal = new bootstrap.Modal(document.getElementById('editMappingModal'));
+            modal.show();
+        }
+        
+        // 更新端口映射
+        async function updatePortMapping() {
+            const mappingId = document.getElementById('edit-mapping-id').value;
+            const name = document.getElementById('edit-mapping-name').value;
+            const localHost = document.getElementById('edit-local-host').value;
+            const localPort = parseInt(document.getElementById('edit-local-port').value);
+            const preferredPort = document.getElementById('edit-preferred-port').value;
+            const description = document.getElementById('edit-mapping-description').value;
+            const autoReconnect = document.getElementById('edit-auto-reconnect').checked;
+            
+            const mappingData = {
+                name,
+                localHost,
+                localPort,
+                preferredPort: preferredPort ? parseInt(preferredPort) : null,
+                description,
+                autoReconnect
+            };
+            
+            try {
+                const response = await fetch(`/api/mappings/${mappingId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(mappingData)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    addLogEntry('success', '端口映射更新成功: ' + name, new Date());
+                    bootstrap.Modal.getInstance(document.getElementById('editMappingModal')).hide();
+                    loadPortMappings();
+                } else {
+                    addLogEntry('error', '更新端口映射失败: ' + result.message, new Date());
+                }
+            } catch (error) {
+                addLogEntry('error', '更新端口映射失败: ' + error.message, new Date());
+            }
+        }
+        
+        // 启动映射
+        async function startMapping(mappingId) {
+            try {
+                const response = await fetch(`/api/mappings/${mappingId}/start`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    addLogEntry('success', result.message, new Date());
+                    loadPortMappings();
+                } else {
+                    addLogEntry('error', '启动映射失败: ' + result.message, new Date());
+                }
+            } catch (error) {
+                addLogEntry('error', '启动映射失败: ' + error.message, new Date());
+            }
+        }
+        
+        // 停止映射
+        async function stopMapping(mappingId) {
+            try {
+                const response = await fetch(`/api/mappings/${mappingId}/stop`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    addLogEntry('warning', result.message, new Date());
+                    loadPortMappings();
+                } else {
+                    addLogEntry('error', '停止映射失败: ' + result.message, new Date());
+                }
+            } catch (error) {
+                addLogEntry('error', '停止映射失败: ' + error.message, new Date());
+            }
+        }
+        
+        // 删除映射
+        async function deleteMapping(mappingId) {
+            const mapping = currentMappings.find(m => m.id === mappingId);
+            if (!mapping) return;
+            
+            if (!confirm(`确认删除端口映射 "${mapping.name}" 吗？`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/mappings/${mappingId}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    addLogEntry('warning', '端口映射已删除: ' + mapping.name, new Date());
+                    loadPortMappings();
+                } else {
+                    addLogEntry('error', '删除端口映射失败: ' + result.message, new Date());
+                }
+            } catch (error) {
+                addLogEntry('error', '删除端口映射失败: ' + error.message, new Date());
+            }
+        }
+        
+        // 定期刷新映射状态
+        setInterval(loadPortMappings, 5000);
     </script>
 </body>
 </html>

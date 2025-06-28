@@ -1,0 +1,26 @@
+{
+    "server": {
+        "webPort": 3000,
+        "localProxyPort": 9000
+    },
+    "portRanges": [
+        {
+            "id": "default",
+            "name": "默认端口范围",
+            "type": "range",
+            "startPort": 25565,
+            "endPort": 25570,
+            "enabled": true,
+            "description": "默认MC服务器端口范围"
+        }
+    ],
+    "specificPorts": [
+        {
+            "id": "web",
+            "port": 8080,
+            "name": "Web服务端口",
+            "enabled": true,
+            "description": "用于Web应用"
+        }
+    ]
+}
