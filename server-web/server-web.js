@@ -119,8 +119,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/api/stats', (req, res) => {
     res.json({
         ...connectionStats,
-        waitingQueueLength: Array.from(waitingQueue.values()).reduce((sum, queue) => sum + queue.length, 0),
-        idleConnectionsCount: Array.from(idleLocalSockets.values()).reduce((sum, sockets) => sum + sockets.length, 0),
         activeConnectionsCount: activeConnections.size,
         uptime: Date.now() - connectionStats.serverStartTime.getTime(),
         activePorts: activeServers.size,
@@ -337,10 +335,10 @@ function removePortMapping(localPort) {
 function broadcastStats() {
     io.emit('stats-update', {
         ...connectionStats,
-        waitingQueueLength: waitingQueue.length,
-        idleConnectionsCount: idleLocalSockets.length,
         activeConnectionsCount: activeConnections.size,
-        uptime: Date.now() - connectionStats.serverStartTime.getTime()
+        uptime: Date.now() - connectionStats.serverStartTime.getTime(),
+        activePorts: activeServers.size,
+        totalMappings: portMappings.size
     });
 }
 
@@ -598,8 +596,8 @@ const localProxyServer = net.createServer((localSocket) => {
             return;
         }
         
-        // 如果已经建立连接，这里不应该收到数据
-        broadcastLog('warning', '未建立映射的内网连接收到数据，忽略');
+        // 如果已经建立连接，这里不应该收到数据，降低日志级别避免刷屏
+        // broadcastLog('warning', '未建立映射的内网连接收到数据，忽略');
     });
     
     const onLocalClose = () => {

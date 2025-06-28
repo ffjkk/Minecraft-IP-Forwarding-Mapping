@@ -337,8 +337,26 @@ async function startMapping(mapping) {
     }
     
     try {
-        // 请求端口分配
-        const publicPort = await requestPortAllocation(mapping);
+        let publicPort;
+        
+        // 如果映射已经有公网端口，尝试重用它
+        if (mapping.publicPort) {
+            try {
+                // 验证端口是否仍然可用
+                await requestPortAllocation(mapping);
+                publicPort = mapping.publicPort;
+                broadcastLog('info', `重用现有端口映射: ${mapping.name} -> 公网:${publicPort}`);
+            } catch (error) {
+                // 如果现有端口不可用，重新分配
+                broadcastLog('warning', `端口 ${mapping.publicPort} 不可用，重新分配: ${error.message}`);
+                mapping.publicPort = null;
+                publicPort = await requestPortAllocation(mapping);
+            }
+        } else {
+            // 请求新的端口分配
+            publicPort = await requestPortAllocation(mapping);
+        }
+        
         mapping.publicPort = publicPort;
         
         // 保存更新后的配置
@@ -390,10 +408,13 @@ async function requestPortAllocation(mapping) {
     try {
         const serverWebPort = 3000; // 服务端Web端口，可以从配置获取
         
+        // 如果映射已有公网端口，优先使用它作为首选端口
+        const preferredPort = mapping.publicPort || mapping.preferredPort;
+        
         // 使用 http 模块替代 fetch
         const requestData = JSON.stringify({
             localPort: mapping.localPort,
-            preferredPort: mapping.preferredPort
+            preferredPort: preferredPort
         });
         
         return new Promise((resolve, reject) => {
@@ -624,6 +645,7 @@ function broadcastStats() {
         idleConnections: totalIdleConnections,
         totalConnections: totalActiveConnections + totalIdleConnections,
         uptime: Date.now() - connectionStats.clientStartTime.getTime(),
+        connectionHistory: connectionHistory.slice(-50),
         activeMappings: activeMappings.size
     });
 }
@@ -651,6 +673,8 @@ server.listen(WEB_PORT, () => {
     // 自动启动已启用的映射
     setTimeout(() => {
         broadcastLog('info', '开始自动启动已配置的端口映射...');
+        shouldMaintainConnection = true;
+        connectionStats.currentStatus = 'running';
         startAllMappings();
     }, 2000);
 });

@@ -428,11 +428,13 @@
         socket.on('connect', () => {
             document.getElementById('connection-status').className = 'bi bi-circle-fill status-online';
             document.getElementById('connection-text').textContent = '已连接';
+            addLogEntry('success', 'WebSocket连接已建立', new Date());
         });
 
         socket.on('disconnect', () => {
             document.getElementById('connection-status').className = 'bi bi-circle-fill status-offline';
             document.getElementById('connection-text').textContent = '连接断开';
+            addLogEntry('warning', 'WebSocket连接已断开', new Date());
         });
 
         // 统计信息更新
@@ -460,6 +462,11 @@
             // 更新活跃映射数
             if (stats.activeMappings !== undefined) {
                 document.getElementById('active-mappings').textContent = stats.activeMappings;
+            }
+            
+            // 更新连接历史
+            if (stats.connectionHistory) {
+                updateConnectionHistory(stats.connectionHistory);
             }
             
             // 更新客户端状态
@@ -692,6 +699,8 @@
         
         // 页面加载时初始化
         document.addEventListener('DOMContentLoaded', () => {
+            // 添加欢迎日志
+            addLogEntry('info', '客户端管理面板已加载', new Date());
             loadPortMappings();
         });
         

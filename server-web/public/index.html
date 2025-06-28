@@ -89,7 +89,7 @@
     <div class="container-fluid mt-4">
         <!-- 状态卡片 -->
         <div class="row mb-4">
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <div class="card status-card h-100">
                     <div class="card-body text-center">
                         <i class="bi bi-people-fill text-primary" style="font-size: 2rem;"></i>
@@ -98,7 +98,7 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <div class="card status-card h-100">
                     <div class="card-body text-center">
                         <i class="bi bi-lightning-fill text-success" style="font-size: 2rem;"></i>
@@ -107,25 +107,7 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-2">
-                <div class="card status-card h-100">
-                    <div class="card-body text-center">
-                        <i class="bi bi-clock-fill text-warning" style="font-size: 2rem;"></i>
-                        <h4 class="mt-2" id="waiting-queue">0</h4>
-                        <p class="text-muted mb-0">等待队列</p>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-2">
-                <div class="card status-card h-100">
-                    <div class="card-body text-center">
-                        <i class="bi bi-hdd-fill text-info" style="font-size: 2rem;"></i>
-                        <h4 class="mt-2" id="idle-connections">0</h4>
-                        <p class="text-muted mb-0">空闲连接</p>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <div class="card status-card h-100">
                     <div class="card-body text-center">
                         <i class="bi bi-hdd-network text-primary" style="font-size: 2rem;"></i>
@@ -134,7 +116,7 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <div class="card status-card h-100">
                     <div class="card-body text-center">
                         <i class="bi bi-arrow-left-right text-success" style="font-size: 2rem;"></i>
@@ -381,9 +363,6 @@
         socket.on('stats-update', (stats) => {
             document.getElementById('total-connections').textContent = stats.totalConnections;
             document.getElementById('active-connections').textContent = stats.activeConnectionsCount;
-            document.getElementById('waiting-queue').textContent = stats.waitingQueueLength;
-            document.getElementById('idle-connections').textContent = stats.idleConnectionsCount;
-            document.getElementById('active-count-badge').textContent = stats.activeConnectionsCount;
             document.getElementById('active-ports').textContent = stats.activePorts || 0;
             document.getElementById('total-mappings').textContent = stats.totalMappings || 0;
             
