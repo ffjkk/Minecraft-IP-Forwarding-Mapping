@@ -298,3 +298,127 @@ connectionStats.currentStatus在建立连接成功后也一直是running，没�
 现在是默认对应端口都支持tcp/udp了吗，客户端页面没有看到创建映射时的协议选择
 ```
 
+![image-20250629145257380](C:\Users\fjk\AppData\Roaming\Typora\typora-user-images\image-20250629145257380.png)
+
+```
+服务器端的转发好像没问题了，我可以看到它检测到玩家的ip，但是客户端好像没有映射到游戏服务器，虽然也看到了它收到数据并转发到本地，帮我进一步修复一下
+
+
+下面是游戏端启动的信息
+Executing listen server config file
+VSCRIPT: Running mapspawn.nut
+CSpeechScriptBridge initializing...
+	HSCRIPT loaded successfully
+SCRIPT PERF WARNING --- "ScriptMode_Init" ran long at 2.251091ms
+Initializing Director's script
+Commentary: Loading commentary data from maps/c10m1_caves_commentary.txt. 
+VSCRIPT: Running anv_mapfixes.nut
+SCRIPT PERF WARNING --- "ScriptMode_Init" ran long at 2.509543ms
+Initializing Director's script
+Sending UDP connect to public IP 127.0.0.1:27015
+Server using '<none>' lobbies, requiring pw no, lobby id 0
+RememberIPAddressForLobby: lobby 0 from address loopback
+CSteam3Client::InitiateConnection: loopback
+String Table dictionary for downloadables should be rebuilt, only found 29 of 51 strings in dictionary
+String Table dictionary for modelprecache should be rebuilt, only found 417 of 474 strings in dictionary
+String Table dictionary for soundprecache should be rebuilt, only found 15872 of 18771 strings in dictionary
+String Table dictionary for Scenes should be rebuilt, only found 12833 of 15613 strings in dictionary
+
+Left 4 Dead 2
+Map: c10m1_caves
+Players: 1 (0 bots) / 4 humans
+Build: 9477
+Server Number: 6
+
+CAsyncWavDataCache:  390 .wavs total 0 bytes, 0.00 % of capacity
+No pure server whitelist. sv_pure = 0
+#Cstrike_TitlesTXT_Game_connected
+Receiving uncompressed update from server
+Late precache of models/props_vehicles/deliveryvan_armored_glass.mdl
+Late precache of models/props_vehicles/deliveryvan_armored.mdl
+Anniversary Map Fixes: Restart with Launch Option -dev to reveal verbose entity debug dumps.
+Anniversary Demo Mode: Run "script_execute z_developer_showupdate" >> "script ShowUpdate()".
+SCRIPT PERF WARNING --- "__RunGameEventCallbacks" ran long at 3.147840ms
+Connection to Steam servers successful.
+   VAC secure mode disabled.
+```
+
+
+
+```
+还是连接建立的问题，服务端和客户端感觉可能都有问题，不过我可以看到它检测到玩家的ip，但是没有正确映射到游戏服务器
+看起来是玩家->中转服务端->中转客户端 x 游戏服务器
+没有与l4d2游戏服务器建立起映射，请你帮我根据这些消息修复一下问题，可以添加一个检测看看有没有接入本地游戏服务器27015
+
+
+下面是游戏端启动的信息
+Executing listen server config file
+VSCRIPT: Running mapspawn.nut
+CSpeechScriptBridge initializing...
+	HSCRIPT loaded successfully
+SCRIPT PERF WARNING --- "ScriptMode_Init" ran long at 2.251091ms
+Initializing Director's script
+Commentary: Loading commentary data from maps/c10m1_caves_commentary.txt. 
+VSCRIPT: Running anv_mapfixes.nut
+SCRIPT PERF WARNING --- "ScriptMode_Init" ran long at 2.509543ms
+Initializing Director's script
+Sending UDP connect to public IP 127.0.0.1:27015
+Server using '<none>' lobbies, requiring pw no, lobby id 0
+RememberIPAddressForLobby: lobby 0 from address loopback
+CSteam3Client::InitiateConnection: loopback
+String Table dictionary for downloadables should be rebuilt, only found 29 of 51 strings in dictionary
+String Table dictionary for modelprecache should be rebuilt, only found 417 of 474 strings in dictionary
+String Table dictionary for soundprecache should be rebuilt, only found 15872 of 18771 strings in dictionary
+String Table dictionary for Scenes should be rebuilt, only found 12833 of 15613 strings in dictionary
+
+Left 4 Dead 2
+Map: c10m1_caves
+Players: 1 (0 bots) / 4 humans
+Build: 9477
+Server Number: 6
+
+CAsyncWavDataCache:  390 .wavs total 0 bytes, 0.00 % of capacity
+No pure server whitelist. sv_pure = 0
+#Cstrike_TitlesTXT_Game_connected
+Receiving uncompressed update from server
+Late precache of models/props_vehicles/deliveryvan_armored_glass.mdl
+Late precache of models/props_vehicles/deliveryvan_armored.mdl
+Anniversary Map Fixes: Restart with Launch Option -dev to reveal verbose entity debug dumps.
+Anniversary Demo Mode: Run "script_execute z_developer_showupdate" >> "script ShowUpdate()".
+SCRIPT PERF WARNING --- "__RunGameEventCallbacks" ran long at 3.147840ms
+Connection to Steam servers successful.
+   VAC secure mode disabled.
+```
+
+
+
+```
+我看网上说要用l4d2映射要用本地ipv4，不能用127.0.0.1，我试了一下好像离成功又近了一步，用户可以出现在游戏服务器控制台里显示了，一直卡在游戏进入界面，但是还是没连接进去
+
+客户端的响应如下：连接没有成功建立，虽然中途成功转发一些数据回去代理服务器，有些会失败，但是最终连接超时而失败
+[16:30:53] [SUCCESS] UDP数据已转发到本地 172.16.89.158:27015
+[16:30:53] [SUCCESS] 收到本地UDP响应，来自 172.16.89.158:27015，大小: 56字节
+[16:30:53] [SUCCESS] UDP响应已发送回代理服务器，大小: 56字节
+[16:30:55] [INFO] 收到UDP数据包，来自 113.78.195.29:27005，目标端口: 27015，大小: 23字节
+[16:30:55] [INFO] UDP客户端绑定到端口: 62967，准备转发到 172.16.89.158:27015
+[16:30:55] [SUCCESS] UDP数据已转发到本地 172.16.89.158:27015
+[16:30:55] [SUCCESS] 收到本地UDP响应，来自 172.16.89.158:27015，大小: 56字节
+[16:30:55] [SUCCESS] UDP响应已发送回代理服务器，大小: 56字节
+[16:30:55] [INFO] 收到UDP数据包，来自 113.78.195.29:27005，目标端口: 27015，大小: 756字节
+[16:30:55] [INFO] UDP客户端绑定到端口: 62968，准备转发到 172.16.89.158:27015
+[16:30:55] [SUCCESS] UDP数据已转发到本地 172.16.89.158:27015
+[16:30:55] [SUCCESS] 收到本地UDP响应，来自 172.16.89.158:27015，大小: 20字节
+[16:30:55] [SUCCESS] UDP响应已发送回代理服务器，大小: 20字节
+[16:30:55] [INFO] 收到UDP数据包，来自 113.78.195.29:27005，目标端口: 27015，大小: 571字节
+[16:30:55] [INFO] UDP客户端绑定到端口: 62969，准备转发到 172.16.89.158:27015
+[16:30:55] [SUCCESS] UDP数据已转发到本地 172.16.89.158:27015
+[16:31:05] [WARNING] UDP响应超时，关闭连接
+[16:31:25] [INFO] 收到UDP数据包，来自 113.78.195.29:27005，目标端口: 27015，大小: 16字节
+[16:31:25] [INFO] UDP客户端绑定到端口: 60892，准备转发到 172.16.89.158:27015
+[16:31:25] [SUCCESS] UDP数据已转发到本地 172.16.89.158:27015
+[16:31:35] [WARNING] UDP响应超时，关闭连接
+[16:31:55] [INFO] 收到UDP数据包，来自 113.78.195.29:27005，目标端口: 27015，大小: 16字节
+[16:32:10] [INFO] UDP客户端绑定到端口: 60921，准备转发到 172.16.89.158:27015
+[16:32:10] [SUCCESS] UDP数据已转发到本地 172.16.89.158:27015
+```
+
