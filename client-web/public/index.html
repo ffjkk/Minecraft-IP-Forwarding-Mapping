@@ -309,6 +309,15 @@
                             <div class="form-text">留空将由服务器自动分配</div>
                         </div>
                         <div class="mb-3">
+                            <label for="mapping-protocol" class="form-label">协议类型</label>
+                            <select class="form-select" id="mapping-protocol" required>
+                                <option value="tcp">TCP（适用于HTTP、HTTPS、Minecraft等）</option>
+                                <option value="udp">UDP（适用于DNS、一些游戏服务器等）</option>
+                                <option value="both" selected>TCP+UDP混合（适用于L4D2、CS等Source引擎游戏）</option>
+                            </select>
+                            <div class="form-text">选择适合你的应用程序的协议类型</div>
+                        </div>
+                        <div class="mb-3">
                             <label for="mapping-description" class="form-label">描述（可选）</label>
                             <textarea class="form-control" id="mapping-description" rows="2"></textarea>
                         </div>
@@ -353,6 +362,15 @@
                             <label for="edit-preferred-port" class="form-label">首选公网端口（可选）</label>
                             <input type="number" class="form-control" id="edit-preferred-port" min="1" max="65535">
                             <div class="form-text">留空将由服务器自动分配</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="edit-mapping-protocol" class="form-label">协议类型</label>
+                            <select class="form-select" id="edit-mapping-protocol" required>
+                                <option value="tcp">TCP（适用于HTTP、HTTPS、Minecraft等）</option>
+                                <option value="udp">UDP（适用于DNS、一些游戏服务器等）</option>
+                                <option value="both">TCP+UDP混合（适用于L4D2、CS等Source引擎游戏）</option>
+                            </select>
+                            <div class="form-text">选择适合你的应用程序的协议类型</div>
                         </div>
                         <div class="mb-3">
                             <label for="edit-mapping-description" class="form-label">描述（可选）</label>
@@ -746,13 +764,17 @@
                                 <span class="badge bg-primary">公网</span><br>
                                 <strong>${mapping.publicPort || '未分配'}</strong>
                             </div>
+                            <div class="col-md-2">
+                                <span class="badge bg-warning">协议</span><br>
+                                <strong>${(mapping.protocol || 'tcp').toUpperCase()}</strong>
+                            </div>
                             <div class="col-md-2 text-center">
                                 <span class="badge ${mapping.active ? 'bg-success' : 'bg-secondary'}">
                                     ${mapping.active ? '运行中' : '已停止'}
                                 </span><br>
                                 <small class="text-muted">${mapping.connections || 0} 连接</small>
                             </div>
-                            <div class="col-md-3 text-end">
+                            <div class="col-md-2 text-end">
                                 <div class="btn-group" role="group">
                                     ${mapping.active ? 
                                         `<button class="btn btn-outline-danger btn-sm" onclick="stopMapping('${mapping.id}')">
@@ -793,10 +815,11 @@
             const localHost = document.getElementById('local-host').value;
             const localPort = parseInt(document.getElementById('local-port').value);
             const preferredPort = document.getElementById('preferred-port').value;
+            const protocol = document.getElementById('mapping-protocol').value;
             const description = document.getElementById('mapping-description').value;
             const autoReconnect = document.getElementById('auto-reconnect').checked;
             
-            if (!name || !localHost || !localPort) {
+            if (!name || !localHost || !localPort || !protocol) {
                 alert('请填写必要字段');
                 return;
             }
@@ -806,6 +829,7 @@
                 localHost,
                 localPort,
                 preferredPort: preferredPort ? parseInt(preferredPort) : null,
+                protocol,
                 description,
                 autoReconnect,
                 enabled: true
@@ -844,6 +868,7 @@
             document.getElementById('edit-local-host').value = mapping.localHost;
             document.getElementById('edit-local-port').value = mapping.localPort;
             document.getElementById('edit-preferred-port').value = mapping.preferredPort || '';
+            document.getElementById('edit-mapping-protocol').value = mapping.protocol || 'tcp';
             document.getElementById('edit-mapping-description').value = mapping.description || '';
             document.getElementById('edit-auto-reconnect').checked = mapping.autoReconnect;
             
@@ -858,6 +883,7 @@
             const localHost = document.getElementById('edit-local-host').value;
             const localPort = parseInt(document.getElementById('edit-local-port').value);
             const preferredPort = document.getElementById('edit-preferred-port').value;
+            const protocol = document.getElementById('edit-mapping-protocol').value;
             const description = document.getElementById('edit-mapping-description').value;
             const autoReconnect = document.getElementById('edit-auto-reconnect').checked;
             
@@ -866,6 +892,7 @@
                 localHost,
                 localPort,
                 preferredPort: preferredPort ? parseInt(preferredPort) : null,
+                protocol,
                 description,
                 autoReconnect
             };

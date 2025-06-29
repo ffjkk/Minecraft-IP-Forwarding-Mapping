@@ -12,6 +12,15 @@
             "endPort": 25570,
             "enabled": true,
             "description": "默认MC服务器端口范围"
+        },
+        {
+            "id": "l4d2",
+            "name": "L4D2端口范围",
+            "type": "range",
+            "startPort": 27015,
+            "endPort": 27020,
+            "enabled": true,
+            "description": "Left 4 Dead 2 游戏端口范围"
         }
     ],
     "specificPorts": [
@@ -21,6 +30,13 @@
             "name": "Web服务端口",
             "enabled": true,
             "description": "用于Web应用"
+        },
+        {
+            "id": "l4d2-main",
+            "port": 27015,
+            "name": "L4D2主端口",
+            "enabled": true,
+            "description": "Left 4 Dead 2 主要游戏端口（TCP/UDP）"
         }
     ]
 }

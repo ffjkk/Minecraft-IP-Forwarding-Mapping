@@ -6,6 +6,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 const net = require('net');
+const dgram = require('dgram'); // 添加UDP支持
 const fs = require('fs');
 
 // 配置文件管理
@@ -81,7 +82,8 @@ function getAvailablePorts(config) {
 
 // 检查端口是否被占用
 function isPortOccupied(port) {
-    return activeServers.has(port) || port === config.server.webPort || port === config.server.localProxyPort;
+    return activeServers.has(port) || activeUdpServers.has(port) || 
+           port === config.server.webPort || port === config.server.localProxyPort;
 }
 
 // Web服务器配置
@@ -94,8 +96,11 @@ let connectionId = 0;
 const waitingQueue = new Map(); // port -> queue
 const idleLocalSockets = new Map(); // port -> sockets array
 const activeConnections = new Map(); // connectionId -> connection info
-const activeServers = new Map(); // port -> server instance
+const activeServers = new Map(); // port -> server instance (TCP)
+const activeUdpServers = new Map(); // port -> server instance (UDP)
+const udpClientMappings = new Map(); // port -> { address, port } mappings for UDP clients
 const portMappings = new Map(); // localPort -> publicPort
+const portProtocols = new Map(); // publicPort -> 'tcp' | 'udp' | 'both'
 const connectionStats = {
     totalConnections: 0,
     activeConnections: 0,
@@ -161,7 +166,7 @@ app.get('/api/ports/active', (req, res) => {
 });
 
 app.post('/api/ports/allocate', (req, res) => {
-    const { localPort, preferredPort } = req.body;
+    const { localPort, preferredPort, protocol = 'both' } = req.body; // 添加协议类型支持
     
     try {
         let allocatedPort = null;
@@ -188,14 +193,15 @@ app.post('/api/ports/allocate', (req, res) => {
         
         if (allocatedPort) {
             // 创建端口映射和服务器
-            const success = createPortMapping(localPort, allocatedPort);
+            const success = createPortMapping(localPort, allocatedPort, protocol);
             if (success) {
-                broadcastLog('success', `端口分配成功: ${localPort} -> ${allocatedPort}`);
+                broadcastLog('success', `端口分配成功: ${localPort} -> ${allocatedPort} (${protocol})`);
                 res.json({
                     success: true,
                     localPort: localPort,
                     publicPort: allocatedPort,
-                    message: `端口映射创建成功: ${localPort} -> ${allocatedPort}`
+                    protocol: protocol,
+                    message: `端口映射创建成功: ${localPort} -> ${allocatedPort} (${protocol})`
                 });
             } else {
                 res.status(500).json({
@@ -244,22 +250,68 @@ app.delete('/api/ports/mapping/:localPort', (req, res) => {
 });
 
 // 创建端口映射
-function createPortMapping(localPort, publicPort) {
+function createPortMapping(localPort, publicPort, protocol = 'both') {
     try {
-        if (activeServers.has(publicPort)) {
+        if (activeServers.has(publicPort) || activeUdpServers.has(publicPort)) {
             return false; // 端口已被使用
         }
         
-        // 创建外部用户连接服务器
-        const externalServer = net.createServer((externalSocket) => {
-            handleExternalConnection(externalSocket, publicPort, localPort);
-        });
+        // 保存协议类型
+        portProtocols.set(publicPort, protocol);
         
-        externalServer.listen(publicPort, () => {
-            broadcastLog('success', `外部访问服务器已启动: ${publicPort} -> ${localPort}`);
+        let tcpSuccess = true;
+        let udpSuccess = true;
+        
+        // 创建TCP服务器
+        if (protocol === 'tcp' || protocol === 'both') {
+            try {
+                const externalServer = net.createServer((externalSocket) => {
+                    handleExternalConnection(externalSocket, publicPort, localPort, 'tcp');
+                });
+                
+                externalServer.listen(publicPort, () => {
+                    broadcastLog('success', `TCP外部访问服务器已启动: ${publicPort} -> ${localPort}`);
+                    activeServers.set(publicPort, externalServer);
+                });
+                
+                externalServer.on('error', (err) => {
+                    broadcastLog('error', `TCP服务器 ${publicPort} 启动失败: ${err.message}`);
+                    tcpSuccess = false;
+                });
+            } catch (error) {
+                tcpSuccess = false;
+            }
+        }
+        
+        // 创建UDP服务器
+        if (protocol === 'udp' || protocol === 'both') {
+            try {
+                const udpServer = dgram.createSocket('udp4');
+                
+                udpServer.on('message', (msg, rinfo) => {
+                    handleUdpMessage(msg, rinfo, publicPort, localPort);
+                });
+                
+                udpServer.on('listening', () => {
+                    broadcastLog('success', `UDP外部访问服务器已启动: ${publicPort} -> ${localPort}`);
+                    activeUdpServers.set(publicPort, udpServer);
+                });
+                
+                udpServer.on('error', (err) => {
+                    broadcastLog('error', `UDP服务器 ${publicPort} 启动失败: ${err.message}`);
+                    udpSuccess = false;
+                });
+                
+                udpServer.bind(publicPort);
+            } catch (error) {
+                udpSuccess = false;
+            }
+        }
+        
+        // 只要有一个协议成功就算成功
+        if (tcpSuccess || udpSuccess) {
             portMappings.set(localPort, publicPort);
-            activeServers.set(publicPort, externalServer);
-            connectionStats.activePorts = activeServers.size;
+            connectionStats.activePorts = activeServers.size + activeUdpServers.size;
             connectionStats.totalMappings = portMappings.size;
             
             // 初始化队列和连接池
@@ -271,18 +323,136 @@ function createPortMapping(localPort, publicPort) {
             }
             
             broadcastStats();
-        });
+            return true;
+        }
         
-        externalServer.on('error', (err) => {
-            broadcastLog('error', `外部服务器 ${publicPort} 启动失败: ${err.message}`);
-            return false;
-        });
-        
-        return true;
+        return false;
     } catch (error) {
         broadcastLog('error', `创建端口映射失败: ${error.message}`);
         return false;
     }
+}
+
+// 处理UDP消息
+function handleUdpMessage(msg, rinfo, publicPort, localPort) {
+    const connId = ++connectionId;
+    connectionStats.totalConnections++;
+    
+    broadcastLog('info', `UDP消息从 ${rinfo.address}:${rinfo.port} 到端口 ${publicPort}，大小: ${msg.length}字节`);
+    
+    // 获取空闲的本地连接来转发UDP数据
+    const sockets = idleLocalSockets.get(publicPort) || [];
+    
+    if (sockets.length === 0) {
+        broadcastLog('warning', `端口 ${publicPort} 没有可用的内网连接来转发UDP数据`);
+        return;
+    }
+    
+    // 使用第一个可用的本地连接
+    const localSocket = sockets.shift();
+    idleLocalSockets.set(publicPort, sockets);
+    
+    if (localSocket.destroyed) {
+        broadcastLog('warning', '选中的内网连接已断开，重新尝试');
+        handleUdpMessage(msg, rinfo, publicPort, localPort); // 递归重试
+        return;
+    }
+    
+    // 创建UDP转发连接记录
+    const connectionData = {
+        id: connId,
+        externalIP: rinfo.address,
+        externalPort: rinfo.port,
+        publicPort: publicPort,
+        localPort: localPort,
+        startTime: new Date(),
+        bytesTransferred: msg.length,
+        isUDP: true
+    };
+    
+    activeConnections.set(connId, connectionData);
+    connectionStats.activeConnections++;
+    
+    broadcastLog('success', `UDP代理${connId}建立: ${rinfo.address}:${rinfo.port} -> ${publicPort} -> ${localPort}`);
+    broadcastConnectionEvent('established', connectionData);
+    
+    // 包装UDP数据包，添加客户端信息头
+    const clientInfo = Buffer.alloc(8);
+    // 写入客户端IP（假设IPv4）
+    const ipParts = rinfo.address.split('.');
+    for (let i = 0; i < 4; i++) {
+        clientInfo.writeUInt8(parseInt(ipParts[i]) || 0, i);
+    }
+    // 写入客户端端口
+    clientInfo.writeUInt16BE(rinfo.port, 4);
+    // 写入数据长度
+    clientInfo.writeUInt16BE(msg.length, 6);
+    
+    const wrappedData = Buffer.concat([clientInfo, msg]);
+    
+    // 通过TCP连接转发包装后的UDP数据
+    localSocket.write(wrappedData);
+    
+    connectionStats.totalDataTransferred += msg.length;
+    connectionStats.lastActivity = new Date();
+    
+    // 设置响应处理
+    const responseHandler = (data) => {
+        // 检查是否是UDP响应数据
+        if (data.length >= 8) {
+            const responseLength = data.readUInt16BE(6);
+            if (data.length >= 8 + responseLength) {
+                // 提取UDP响应数据
+                const responseMsg = data.slice(8, 8 + responseLength);
+                
+                // 发送UDP响应回外部客户端
+                const udpServer = activeUdpServers.get(publicPort);
+                if (udpServer) {
+                    udpServer.send(responseMsg, rinfo.port, rinfo.address, (err) => {
+                        if (err) {
+                            broadcastLog('error', `UDP响应发送失败: ${err.message}`);
+                        } else {
+                            broadcastLog('info', `UDP响应已发送回 ${rinfo.address}:${rinfo.port}，大小: ${responseMsg.length}字节`);
+                            connectionData.bytesTransferred += responseMsg.length;
+                            connectionStats.totalDataTransferred += responseMsg.length;
+                        }
+                    });
+                }
+                
+                // 清理连接
+                activeConnections.delete(connId);
+                connectionStats.activeConnections--;
+                broadcastConnectionEvent('closed', connectionData);
+                
+                // 移除响应处理器
+                localSocket.removeListener('data', responseHandler);
+                
+                // 将连接返回空闲池
+                const currentSockets = idleLocalSockets.get(publicPort) || [];
+                currentSockets.push(localSocket);
+                idleLocalSockets.set(publicPort, currentSockets);
+            }
+        }
+    };
+    
+    // 添加响应处理器
+    localSocket.on('data', responseHandler);
+    
+    // 设置超时清理
+    setTimeout(() => {
+        if (activeConnections.has(connId)) {
+            activeConnections.delete(connId);
+            connectionStats.activeConnections--;
+            localSocket.removeListener('data', responseHandler);
+            
+            // 将连接返回空闲池
+            const currentSockets = idleLocalSockets.get(publicPort) || [];
+            currentSockets.push(localSocket);
+            idleLocalSockets.set(publicPort, currentSockets);
+            
+            broadcastLog('info', `UDP连接${connId}超时清理`);
+        }
+    }, 30000); // 30秒超时
 }
 
 // 删除端口映射
@@ -291,13 +461,22 @@ function removePortMapping(localPort) {
         const publicPort = portMappings.get(localPort);
         if (!publicPort) return false;
         
-        // 关闭服务器
+        // 关闭TCP服务器
         const server = activeServers.get(publicPort);
         if (server) {
             server.close(() => {
-                broadcastLog('info', `外部服务器 ${publicPort} 已关闭`);
+                broadcastLog('info', `TCP外部服务器 ${publicPort} 已关闭`);
             });
             activeServers.delete(publicPort);
+        }
+        
+        // 关闭UDP服务器
+        const udpServer = activeUdpServers.get(publicPort);
+        if (udpServer) {
+            udpServer.close(() => {
+                broadcastLog('info', `UDP外部服务器 ${publicPort} 已关闭`);
+            });
+            activeUdpServers.delete(publicPort);
         }
         
         // 清理连接
@@ -319,8 +498,9 @@ function removePortMapping(localPort) {
         portMappings.delete(localPort);
         waitingQueue.delete(publicPort);
         idleLocalSockets.delete(publicPort);
+        portProtocols.delete(publicPort);
         
-        connectionStats.activePorts = activeServers.size;
+        connectionStats.activePorts = activeServers.size + activeUdpServers.size;
         connectionStats.totalMappings = portMappings.size;
         
         broadcastStats();
@@ -358,7 +538,7 @@ function broadcastLog(level, message, data = {}) {
 }
 
 // 处理外部连接
-function handleExternalConnection(externalSocket, publicPort, localPort) {
+function handleExternalConnection(externalSocket, publicPort, localPort, protocol = 'tcp') {
     const connId = ++connectionId;
     connectionStats.totalConnections++;
     

@@ -6,6 +6,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 const net = require('net');
+const dgram = require('dgram'); // 添加UDP支持
 const fs = require('fs');
 
 // 配置文件管理  
@@ -156,7 +157,7 @@ app.get('/api/mappings', (req, res) => {
 
 app.post('/api/mappings', (req, res) => {
     try {
-        const { name, localHost, localPort, preferredPort, description, enabled = true, autoReconnect = true } = req.body;
+        const { name, localHost, localPort, preferredPort, protocol = 'tcp', description, enabled = true, autoReconnect = true } = req.body;
         
         if (!name || !localHost || !localPort) {
             return res.status(400).json({ success: false, message: '缺少必要参数' });
@@ -169,6 +170,7 @@ app.post('/api/mappings', (req, res) => {
             localPort: parseInt(localPort),
             publicPort: null,
             preferredPort: preferredPort ? parseInt(preferredPort) : null,
+            protocol,
             enabled,
             description: description || '',
             autoReconnect
@@ -177,7 +179,7 @@ app.post('/api/mappings', (req, res) => {
         config.portMappings.push(newMapping);
         
         if (saveConfig(config)) {
-            broadcastLog('success', `端口映射已添加: ${name}`);
+            broadcastLog('success', `端口映射已添加: ${name} (${protocol.toUpperCase()})`);
             res.json({ success: true, mapping: newMapping });
         } else {
             res.status(500).json({ success: false, message: '保存配置失败' });
@@ -437,6 +439,15 @@ async function startMapping(mapping) {
             saveConfig(config);
         }
         
+        // 测试本地服务器连接
+        try {
+            await testLocalServerConnection(mapping.localHost, mapping.localPort, mapping.protocol);
+            broadcastLog('success', `本地服务器 ${mapping.localHost}:${mapping.localPort} 连接测试通过`);
+        } catch (error) {
+            broadcastLog('warning', `本地服务器 ${mapping.localHost}:${mapping.localPort} 连接测试失败: ${error.message}`);
+            // 继续执行，因为某些UDP服务器可能不响应测试包
+        }
+        
         // 启动连接池
         connectionPools.set(mapping.id, {
             activeConnections: 0,
@@ -493,7 +504,8 @@ async function requestPortAllocation(mapping) {
         // 使用 http 模块替代 fetch
         const requestData = JSON.stringify({
             localPort: mapping.localPort,
-            preferredPort: preferredPort
+            preferredPort: preferredPort,
+            protocol: mapping.protocol || 'tcp' // 添加协议类型支持
         });
         
         return new Promise((resolve, reject) => {
@@ -615,7 +627,138 @@ function createMappingConnection(mapping) {
         
         // 等待外部连接数据
         proxySocket.on('data', (data) => {
+            // 检查是否是UDP数据包（包装格式：8字节头 + UDP数据）
+            if (data.length >= 8) {
+                // 读取客户端信息头
+                const clientIP = `${data.readUInt8(0)}.${data.readUInt8(1)}.${data.readUInt8(2)}.${data.readUInt8(3)}`;
+                const clientPort = data.readUInt16BE(4);
+                const udpDataLength = data.readUInt16BE(6);
+                
+                // 检查是否是UDP数据包（通过检查IP是否为0.0.0.0来区分UDP响应）
+                const isUdpResponse = (clientIP === '0.0.0.0' && clientPort === 0);
+                
+                if (!isUdpResponse && data.length >= 8 + udpDataLength && udpDataLength > 0) {
+                    // 这是一个来自外部的UDP数据包
+                    const udpData = data.slice(8, 8 + udpDataLength);
+                    
+                    broadcastLog('info', `收到UDP数据包，来自 ${clientIP}:${clientPort}，目标端口: ${mapping.localPort}，大小: ${udpDataLength}字节`);
+                    
+                    // 检查是否为L4D2映射（使用连接池）
+                    const isL4D2 = mapping.localPort === 27015 || mapping.name.toLowerCase().includes('l4d2');
+                    
+                    let localUdpClient;
+                    
+                    if (isL4D2) {
+                        // 使用L4D2连接池
+                        localUdpClient = getOrCreateL4D2UdpClient(mapping.id, clientIP, clientPort, mapping.localHost, mapping.localPort);
+                    } else {
+                        // 创建新的UDP客户端
+                        localUdpClient = dgram.createSocket('udp4');
+                    }
+                    
+                    // 设置接收响应的监听器
+                    let responseReceived = false;
+                    let responseTimeout = null;
+                    
+                    const handleResponse = (responseMsg, responseRinfo) => {
+                        if (responseReceived) return; // 防止重复处理
+                        responseReceived = true;
+                        
+                        // 清除超时定时器
+                        if (responseTimeout) {
+                            clearTimeout(responseTimeout);
+                            responseTimeout = null;
+                        }
+                        
+                        broadcastLog('success', `收到本地UDP响应，来自 ${responseRinfo.address}:${responseRinfo.port}，大小: ${responseMsg.length}字节`);
+                        
+                        // 包装响应数据，保持与服务端约定的格式一致
+                        const responseHeader = Buffer.alloc(8);
+                        // 前4字节：响应标识（设为0表示响应）
+                        responseHeader.writeUInt8(0, 0);
+                        responseHeader.writeUInt8(0, 1);
+                        responseHeader.writeUInt8(0, 2);
+                        responseHeader.writeUInt8(0, 3);
+                        // 第5-6字节：端口号（设为0）
+                        responseHeader.writeUInt16BE(0, 4);
+                        // 第7-8字节：数据长度
+                        responseHeader.writeUInt16BE(responseMsg.length, 6);
+                        
+                        const wrappedResponse = Buffer.concat([responseHeader, responseMsg]);
+                        
+                        // 通过TCP连接发送回代理服务器
+                        if (!proxySocket.destroyed) {
+                            proxySocket.write(wrappedResponse);
+                            connectionRecord.bytesTransferred += responseMsg.length;
+                            connectionStats.totalDataTransferred += responseMsg.length;
+                            broadcastLog('success', `UDP响应已发送回代理服务器，大小: ${responseMsg.length}字节`);
+                        }
+                        
+                        // 对于非L4D2连接，延迟关闭UDP客户端
+                        if (!isL4D2) {
+                            setTimeout(() => {
+                                if (!localUdpClient.destroyed) {
+                                    localUdpClient.close();
+                                }
+                            }, 500);
+                        }
+                    };
+                    
+                    // 如果是新创建的客户端，添加事件监听器
+                    if (!isL4D2 || !localUdpClient.listenerCount('message')) {
+                        localUdpClient.on('message', handleResponse);
+                        
+                        localUdpClient.on('error', (err) => {
+                            broadcastLog('error', `UDP本地客户端错误: ${err.message}`);
+                            responseReceived = true;
+                            if (responseTimeout) {
+                                clearTimeout(responseTimeout);
+                                responseTimeout = null;
+                            }
+                            if (!isL4D2 && !localUdpClient.destroyed) {
+                                localUdpClient.close();
+                            }
+                        });
+                    }
+                    
+                    // 转发UDP数据到本地服务器
+                    localUdpClient.send(udpData, mapping.localPort, mapping.localHost, (err) => {
+                        if (err) {
+                            broadcastLog('error', `UDP转发到本地失败: ${err.message}`);
+                            responseReceived = true;
+                            if (responseTimeout) {
+                                clearTimeout(responseTimeout);
+                                responseTimeout = null;
+                            }
+                            if (!isL4D2 && !localUdpClient.destroyed) {
+                                localUdpClient.close();
+                            }
+                        } else {
+                            broadcastLog('success', `UDP数据已转发到本地 ${mapping.localHost}:${mapping.localPort} ${isL4D2 ? '(L4D2连接池)' : ''}`);
+                            connectionRecord.bytesTransferred += udpDataLength;
+                            connectionStats.totalDataTransferred += udpDataLength;
+                            connectionStats.lastActivity = new Date();
+                        }
+                    });
+                    
+                    // 设置UDP响应超时（L4D2使用更长的超时时间）
+                    const timeoutDuration = isL4D2 ? 15000 : 5000; // L4D2用15秒，其他用5秒
+                    responseTimeout = setTimeout(() => {
+                        if (!responseReceived) {
+                            responseReceived = true;
+                            broadcastLog('warning', `UDP响应超时(${timeoutDuration/1000}秒)，${isL4D2 ? 'L4D2连接' : '关闭连接'} - 来自 ${clientIP}:${clientPort}`);
+                            if (!isL4D2 && !localUdpClient.destroyed) {
+                                localUdpClient.close();
+                            }
+                        }
+                    }, timeoutDuration);
+                    
+                    return; // UDP处理完成，直接返回
+                }
+            }
+            
             if (!connectionRecord.localConnected) {
+                // 原有的TCP连接处理逻辑
                 // 建立到本地服务的连接
                 const localSocket = net.connect(mapping.localPort, mapping.localHost);
                 connectionRecord.localConnected = true;
@@ -726,6 +869,56 @@ function createMappingConnection(mapping) {
     broadcastStats();
 }
 
+// 测试本地服务器连接
+async function testLocalServerConnection(host, port, protocol = 'tcp') {
+    return new Promise((resolve, reject) => {
+        if (protocol === 'tcp' || protocol === 'both') {
+            // 测试TCP连接
+            const testSocket = net.createConnection({
+                host: host,
+                port: port,
+                timeout: 3000
+            });
+            
+            testSocket.on('connect', () => {
+                broadcastLog('success', `本地TCP服务器 ${host}:${port} 连接测试成功`);
+                testSocket.end();
+                resolve({ tcp: true });
+            });
+            
+            testSocket.on('timeout', () => {
+                broadcastLog('warning', `本地TCP服务器 ${host}:${port} 连接超时`);
+                testSocket.destroy();
+                reject(new Error(`TCP连接超时`));
+            });
+            
+            testSocket.on('error', (err) => {
+                broadcastLog('error', `本地TCP服务器 ${host}:${port} 连接失败: ${err.message}`);
+                reject(err);
+            });
+        }
+        
+        if (protocol === 'udp' || protocol === 'both') {
+            // 测试UDP连接（发送测试包）
+            const testUdpClient = dgram.createSocket('udp4');
+            const testMessage = Buffer.from('test');
+            
+            testUdpClient.send(testMessage, port, host, (err) => {
+                if (err) {
+                    broadcastLog('warning', `本地UDP服务器 ${host}:${port} 测试包发送失败: ${err.message}`);
+                } else {
+                    broadcastLog('info', `本地UDP服务器 ${host}:${port} 测试包已发送`);
+                }
+                testUdpClient.close();
+                
+                if (protocol === 'udp') {
+                    resolve({ udp: true });
+                }
+            });
+        }
+    });
+}
+
 // 广播状态更新到所有连接的客户端
 function broadcastStats() {
     const totalActiveConnections = Array.from(connectionPools.values())
@@ -758,6 +951,74 @@ function broadcastLog(level, message, data = {}) {
     const timeStr = logEntry.timestamp.toLocaleTimeString();
     console.log(`[${timeStr}] [${level.toUpperCase()}] ${message}`);
 }
+
+// L4D2 UDP连接池管理
+const l4d2UdpPools = new Map(); // mappingId -> { pool: Map<clientKey, udpClient>, lastCleanup: timestamp }
+
+// 获取或创建L4D2 UDP连接
+function getOrCreateL4D2UdpClient(mappingId, clientIP, clientPort, localHost, localPort) {
+    const clientKey = `${clientIP}:${clientPort}`;
+    
+    if (!l4d2UdpPools.has(mappingId)) {
+        l4d2UdpPools.set(mappingId, {
+            pool: new Map(),
+            lastCleanup: Date.now()
+        });
+    }
+    
+    const poolInfo = l4d2UdpPools.get(mappingId);
+    
+    // 检查是否有现有连接
+    if (poolInfo.pool.has(clientKey)) {
+        const existingClient = poolInfo.pool.get(clientKey);
+        if (!existingClient.destroyed) {
+            broadcastLog('info', `重用L4D2 UDP连接: ${clientKey}`);
+            return existingClient;
+        } else {
+            poolInfo.pool.delete(clientKey);
+        }
+    }
+    
+    // 创建新的UDP客户端
+    const udpClient = dgram.createSocket('udp4');
+    poolInfo.pool.set(clientKey, udpClient);
+    
+    // 设置连接超时清理
+    setTimeout(() => {
+        if (poolInfo.pool.has(clientKey)) {
+            const client = poolInfo.pool.get(clientKey);
+            if (!client.destroyed) {
+                client.close();
+            }
+            poolInfo.pool.delete(clientKey);
+            broadcastLog('info', `清理L4D2 UDP连接: ${clientKey}`);
+        }
+    }, 30000); // 30秒后清理
+    
+    broadcastLog('info', `创建新的L4D2 UDP连接: ${clientKey}`);
+    return udpClient;
+}
+
+// 清理过期的L4D2 UDP连接
+function cleanupL4D2UdpPools() {
+    const now = Date.now();
+    for (const [mappingId, poolInfo] of l4d2UdpPools) {
+        // 每5分钟清理一次
+        if (now - poolInfo.lastCleanup > 300000) {
+            for (const [clientKey, udpClient] of poolInfo.pool) {
+                if (!udpClient.destroyed) {
+                    udpClient.close();
+                }
+            }
+            poolInfo.pool.clear();
+            poolInfo.lastCleanup = now;
+            broadcastLog('info', `清理映射 ${mappingId} 的所有L4D2 UDP连接`);
+        }
+    }
+}
+
+// 定期清理UDP连接池
+setInterval(cleanupL4D2UdpPools, 60000); // 每分钟检查一次
 
 // 启动Web服务器
 server.listen(WEB_PORT, () => {
