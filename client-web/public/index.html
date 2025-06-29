@@ -510,7 +510,7 @@
             const statusText = statusElement.querySelector('span');
             
             statusElement.className = 'status-indicator';
-            
+            console.log(`更新客户端状态: ${status}`);
             switch (status) {
                 case 'connected':
                     statusElement.classList.add('status-connected');
@@ -518,7 +518,7 @@
                     statusText.textContent = '已连接';
                     break;
                 case 'connecting':
-                    statusElement.classList.add('status-error');
+                    statusElement.classList.add('status-connected'); // 使用连接中的样式
                     statusIcon.className = 'bi bi-circle-fill me-2 status-connecting';
                     statusText.textContent = '连接中...';
                     break;

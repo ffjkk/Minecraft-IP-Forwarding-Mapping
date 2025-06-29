@@ -279,8 +279,8 @@ app.post('/api/mappings/:id/stop', (req, res) => {
 app.post('/api/start', (req, res) => {
     if (!shouldMaintainConnection) {
         shouldMaintainConnection = true;
+        updateClientStatus('connecting');
         startAllMappings();
-        connectionStats.currentStatus = 'running';
         res.json({ success: true, message: '客户端已启动' });
     } else {
         res.json({ success: true, message: '客户端已在运行中' });
@@ -291,7 +291,7 @@ app.post('/api/stop', (req, res) => {
     if (shouldMaintainConnection) {
         shouldMaintainConnection = false;
         stopAllMappings();
-        connectionStats.currentStatus = 'stopped';
+        updateClientStatus('stopped');
         res.json({ success: true, message: '客户端已停止' });
     } else {
         res.json({ success: true, message: '客户端已处于停止状态' });
@@ -302,10 +302,10 @@ app.post('/api/restart', (req, res) => {
     broadcastLog('info', '正在重启客户端服务...');
     shouldMaintainConnection = false;
     stopAllMappings();
+    updateClientStatus('connecting');
     setTimeout(() => {
         shouldMaintainConnection = true;
         startAllMappings();
-        connectionStats.currentStatus = 'running';
         broadcastLog('success', '客户端服务重启完成');
     }, 1000);
     res.json({ success: true, message: '客户端正在重启' });
@@ -313,12 +313,40 @@ app.post('/api/restart', (req, res) => {
 
 // 启动所有映射
 function startAllMappings() {
-    config.portMappings.forEach(mapping => {
-        if (mapping.enabled) {
-            startMapping(mapping).catch(error => {
+    updateClientStatus('connecting');
+    const enabledMappings = config.portMappings.filter(mapping => mapping.enabled);
+    
+    if (enabledMappings.length === 0) {
+        updateClientStatus('stopped');
+        return;
+    }
+    
+    let startedCount = 0;
+    let errorCount = 0;
+    
+    enabledMappings.forEach(mapping => {
+        startMapping(mapping)
+            .then(() => {
+                startedCount++;
+                if (startedCount + errorCount === enabledMappings.length) {
+                    if (startedCount > 0) {
+                        checkConnectionHealth();
+                    } else {
+                        updateClientStatus('error');
+                    }
+                }
+            })
+            .catch(error => {
+                errorCount++;
                 broadcastLog('error', `启动映射失败: ${mapping.name} - ${error.message}`);
+                if (startedCount + errorCount === enabledMappings.length) {
+                    if (startedCount > 0) {
+                        checkConnectionHealth();
+                    } else {
+                        updateClientStatus('error');
+                    }
+                }
             });
-        }
     });
 }
 
@@ -327,6 +355,46 @@ function stopAllMappings() {
     activeMappings.forEach((_, mappingId) => {
         stopMapping(mappingId);
     });
+    updateClientStatus('stopped');
+}
+
+// 更新客户端状态
+function updateClientStatus(status) {
+    connectionStats.currentStatus = status;
+    broadcastStats();
+}
+
+// 检查连接健康状态
+function checkConnectionHealth() {
+    if (!shouldMaintainConnection) {
+        return;
+    }
+    
+    const totalActiveConnections = Array.from(connectionPools.values())
+        .reduce((sum, pool) => sum + pool.activeConnections, 0);
+    const totalIdleConnections = Array.from(connectionPools.values())
+        .reduce((sum, pool) => sum + pool.idleConnections, 0);
+    
+    if (activeMappings.size === 0) {
+        updateClientStatus('stopped');
+    } else if (totalActiveConnections > 0 || totalIdleConnections > 0) {
+        updateClientStatus('connected');
+    } else {
+        // 检查是否连接失败次数过多
+        const recentFailures = connectionHistory
+            .filter(conn => {
+                const timeDiff = Date.now() - new Date(conn.startTime).getTime();
+                return timeDiff < 60000 && // 最近1分钟内
+                       (conn.status === 'failed' || conn.errors.length > 0);
+            }).length;
+        
+        if (recentFailures > 5) {
+            updateClientStatus('error');
+        } else {
+            // 如果有活跃映射但没有连接，说明在重连中
+            updateClientStatus('connecting');
+        }
+    }
 }
 
 // 启动单个映射
@@ -337,6 +405,9 @@ async function startMapping(mapping) {
     }
     
     try {
+        // 更新状态为连接中
+        updateClientStatus('connecting');
+        
         let publicPort;
         
         // 如果映射已经有公网端口，尝试重用它
@@ -385,8 +456,11 @@ async function startMapping(mapping) {
         
         broadcastLog('success', `映射 ${mapping.name} 启动成功: ${mapping.localHost}:${mapping.localPort} -> 公网:${publicPort}`);
         
+        // 不在这里立即设置为 connected，等待实际连接建立后再更新状态
+        
     } catch (error) {
         broadcastLog('error', `启动映射 ${mapping.name} 失败: ${error.message}`);
+        updateClientStatus('error');
         throw error;
     }
 }
@@ -401,6 +475,11 @@ function stopMapping(mappingId) {
     connectionStats.activeMappings = activeMappings.size;
     
     broadcastLog('info', `映射 ${mapping.name} 已停止`);
+    
+    // 如果没有活跃映射了，更新状态为停止
+    if (activeMappings.size === 0) {
+        updateClientStatus('stopped');
+    }
 }
 
 // 请求端口分配
@@ -526,6 +605,9 @@ function createMappingConnection(mapping) {
         connectionStats.successfulConnections++;
         connectionStats.lastActivity = new Date();
         
+        // 检查连接健康状态
+        checkConnectionHealth();
+        
         // 发送端口映射信息
         const header = Buffer.alloc(4);
         header.writeUInt32BE(mapping.publicPort, 0);
@@ -542,6 +624,9 @@ function createMappingConnection(mapping) {
                 
                 localSocket.on('connect', () => {
                     broadcastLog('success', `连接 ${connId} 已连接到本地服务 ${mapping.localHost}:${mapping.localPort}`);
+                    
+                    // 更新连接健康状态
+                    checkConnectionHealth();
                     
                     // 转发首次接收到的数据
                     localSocket.write(data);
@@ -580,6 +665,9 @@ function createMappingConnection(mapping) {
                         
                         broadcastLog('info', `连接 ${connId} 已关闭`);
                         
+                        // 检查连接健康状态
+                        checkConnectionHealth();
+                        
                         // 创建新的空闲连接来替代
                         if (shouldMaintainConnection && activeMappings.has(mapping.id)) {
                             setTimeout(() => createMappingConnection(mapping), 1000);
@@ -597,6 +685,9 @@ function createMappingConnection(mapping) {
                     connectionRecord.errors.push(err.message);
                     pool.idleConnections--;
                     if (!proxySocket.destroyed) proxySocket.destroy();
+                    
+                    // 检查连接健康状态
+                    checkConnectionHealth();
                     
                     // 重试连接
                     setTimeout(() => {
@@ -619,6 +710,9 @@ function createMappingConnection(mapping) {
         if (pool.idleConnections > 0) {
             pool.idleConnections--;
         }
+        
+        // 检查是否所有连接都失败了
+        checkConnectionHealth();
         
         // 重连延迟
         setTimeout(() => {
@@ -695,7 +789,10 @@ io.on('connection', (socket) => {
 });
 
 // 定期广播统计信息
-setInterval(broadcastStats, 3000);
+setInterval(() => {
+    checkConnectionHealth();
+    broadcastStats();
+}, 3000);
 
 // 全局异常处理
 process.on('uncaughtException', (err) => {
